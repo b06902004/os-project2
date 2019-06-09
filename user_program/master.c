@@ -7,82 +7,90 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/time.h>
+#include <time.h> /* clock_gettime */
 
-#define PAGE_SIZE 4096
+#define PAGE_SIZE sysconf(_SC_PAGE_SIZE)
 #define BUF_SIZE 512
-size_t get_filesize(const char* filename);//get the size of the input file
 
+off_t get_filesize(const char* filename); // get the size of the input file
 
 int main (int argc, char* argv[])
 {
-	char buf[BUF_SIZE];
-	int i, dev_fd, file_fd;// the fd for the device and the fd for the input file
-	size_t ret, file_size, offset = 0, tmp;
-	char file_name[50], method[20];
-	char *kernel_address = NULL, *file_address = NULL;
-	struct timeval start;
-	struct timeval end;
-	double trans_time; //calulate the time between the device is opened and it is closed
+    /* unused variables */
+//    size_t offset = 0, tmp;
+//    char *kernel_address = NULL, *file_address = NULL;
 
+    /* Read the parameters */
+    char file_name[50], method[20];
+    strcpy(file_name, argv[1]);
+    strcpy(method, argv[2]);
 
-	strcpy(file_name, argv[1]);
-	strcpy(method, argv[2]);
+    /* Open the master device and start measure transmission time */
+    int dev_fd;
+    struct timespec start;
+    if ((dev_fd = open("/dev/master_device", O_RDWR)) < 0) {
+        perror("failed to open /dev/master_device\n");
+        return 1;
+    }
+    clock_gettime(CLOCK_REALTIME, &start);
 
+    /* Open the input file */
+    int file_fd;
+    if ((file_fd = open(file_name, O_RDWR)) < 0) {
+        perror("failed to open input file\n");
+        return 1;
+    }
 
-	if( (dev_fd = open("/dev/master_device", O_RDWR)) < 0)
-	{
-		perror("failed to open /dev/master_device\n");
-		return 1;
-	}
-	gettimeofday(&start ,NULL);
-	if( (file_fd = open (file_name, O_RDWR)) < 0 )
-	{
-		perror("failed to open input file\n");
-		return 1;
-	}
+    /* Get the size of the input file */
+    off_t file_size;
+    if ((file_size = get_filesize(file_name)) < 0) {
+        perror("failed to get file size\n");
+        return 1;
+    }
 
-	if( (file_size = get_filesize(file_name)) < 0)
-	{
-		perror("failed to get filesize\n");
-		return 1;
-	}
+    /* Ask the master device to create a socket and listen */
+    if (ioctl(dev_fd, 0x12345677) == -1) {
+        perror("ioctl server create socket error\n");
+        return 1;
+    }
 
+    /* Write data to master device */
+    if (strcmp(method, "fcntl") == 0) {
+        int ret;
+        char buf[BUF_SIZE];
+        do {
+            ret = read(file_fd, buf, sizeof(buf));
+            write(dev_fd, buf, ret);
+        } while (ret > 0);
+    }
+    else if (strcmp(method, "mmap") == 0) {
+        // TODO
+    }
+    else {
+        perror("method undefined\n");
+        return 1;
+    }
 
-	if(ioctl(dev_fd, 0x12345677) == -1) //0x12345677 : create socket and accept the connection from the slave
-	{
-		perror("ioclt server create socket error\n");
-		return 1;
-	}
+    /* Ask the master device to close the connection */
+    if (ioctl(dev_fd, 0x12345679) == -1) {
+        perror("ioctl server exits error\n");
+        return 1;
+    }
 
+    /* Close the master device and stop measuring */
+    struct timespec end;
+    close(dev_fd);
+    clock_gettime(CLOCK_REALTIME, &end);
 
-	switch(method[0])
-	{
-		case 'f': //fcntl : read()/write()
-			do
-			{
-				ret = read(file_fd, buf, sizeof(buf)); // read from the input file
-				write(dev_fd, buf, ret);//write to the the device
-			}while(ret > 0);
-			break;
-	}
+    /* Show the transmission time */
+    double trans_time;
+    trans_time = (end.tv_sec - start.tv_sec) * 1e3 + (end.tv_nsec - start.tv_nsec) * 1e-6;
+    printf("Transmission time: %lf ms, File size: %ld bytes\n", trans_time, file_size);
 
-	if(ioctl(dev_fd, 0x12345679) == -1) // end sending data, close the connection
-	{
-		perror("ioclt server exits error\n");
-		return 1;
-	}
-	gettimeofday(&end, NULL);
-	trans_time = (end.tv_sec - start.tv_sec)*1000 + (end.tv_usec - start.tv_usec)*0.0001;
-	printf("Transmission time: %lf ms, File size: %d bytes\n", trans_time, file_size / 8);
-
-	close(file_fd);
-	close(dev_fd);
-
-	return 0;
+    return 0;
 }
 
-size_t get_filesize(const char* filename)
+off_t get_filesize(const char* filename)
 {
     struct stat st;
     stat(filename, &st);

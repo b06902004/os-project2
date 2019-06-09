@@ -1,5 +1,5 @@
 all:
-	gcc master.c -o master
-	gcc slave.c -o slave
+	gcc master.c -o master.out
+	gcc slave.c -o slave.out
 clean:
-	rm slave master
+	rm slave.out master.out
