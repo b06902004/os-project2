@@ -54,3 +54,4 @@ dkms.conf
 # others
 *.pdf
 *.diff
+temp

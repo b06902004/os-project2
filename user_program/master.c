@@ -21,6 +21,10 @@ int main (int argc, char* argv[])
 //    char *kernel_address = NULL, *file_address = NULL;
 
     /* Read the parameters */
+    if (argc != 3) {
+        perror("usage: ./master.out [file_name] [method]\n");
+        return 1;
+    }
     char file_name[50], method[20];
     strcpy(file_name, argv[1]);
     strcpy(method, argv[2]);
@@ -54,13 +58,19 @@ int main (int argc, char* argv[])
         return 1;
     }
 
-    /* Write data to master device */
+    /* Read from input file and write to master device */
     if (strcmp(method, "fcntl") == 0) {
         int ret;
         char buf[BUF_SIZE];
         do {
-            ret = read(file_fd, buf, sizeof(buf));
-            write(dev_fd, buf, ret);
+            if ((ret = read(file_fd, buf, sizeof(buf))) < 0) {
+                perror("read failed\n");
+                return 1;
+            }
+            if (write(dev_fd, buf, ret) < 0) {
+                perror("write failed\n");
+                return 1;
+            }
         } while (ret > 0);
     }
     else if (strcmp(method, "mmap") == 0) {
@@ -78,8 +88,8 @@ int main (int argc, char* argv[])
     }
 
     /* Close the master device and stop measuring */
-    struct timespec end;
     close(dev_fd);
+    struct timespec end;
     clock_gettime(CLOCK_REALTIME, &end);
 
     /* Show the transmission time */
