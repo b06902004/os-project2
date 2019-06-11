@@ -73,6 +73,33 @@ int main (int argc, char* argv[])
         } while (ret > 0);
     }
     else if (strcmp(method, "mmap") == 0) {
+        char *file_address = NULL, *kernel_address = NULL;
+
+        file_address = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, file_fd, 0);
+        if(file_address == MAP_FAILED) {
+            perror("file_address = MAP_FAILED");
+            return 1;
+        }
+
+        kernel_address = mmap(NULL, PAGE_SIZE, PROT_WRITE, MAP_SHARED, dev_fd, 0);
+        if(kernel_address == MAP_FAILED) {
+            perror("kernel_address = MAP_FAILED");
+            return 1;
+        }
+
+        size_t offset = 0;
+        while (offset < file_size) {
+            size_t count = file_size - offset < PAGE_SIZE? file_size - offset : PAGE_SIZE;
+            memcpy(kernel_address, file_address + offset, count);
+            if (ioctl(dev_fd, master_IOCTL_MMAP, &count) < 0) {
+                perror("option master_IOCTL_MMAP failed");
+                return 1;
+            }
+            offset += count;
+        }
+        ioctl(dev_fd, 0, kernel_address); // default option
+        munmap(file_address, file_size);
+        munmap(kernel_address, PAGE_SIZE);
     }
     else {
         perror("method undefined");
