@@ -16,6 +16,11 @@
 #define slave_IOCTL_MMAP 0x12345678
 #define slave_IOCTL_EXIT 0x12345679
 
+struct dev_mmap_arg {
+	size_t count;
+	size_t offset;
+};
+
 int main (int argc, char* argv[])
 {
     /* Read the parameters */
@@ -70,6 +75,44 @@ int main (int argc, char* argv[])
         } while (ret > 0);
     }
     else if (strcmp(method, "mmap") == 0) {
+        char *kernel_address = mmap(NULL, PAGE_SIZE, PROT_READ, MAP_PRIVATE, dev_fd, 0);
+
+        while(1) {
+            size_t data_size = 0;
+            struct dev_mmap_arg dm_arg;
+
+            dm_arg.count = PAGE_SIZE;
+            dm_arg.offset = 0;
+            while (data_size < PAGE_SIZE) {
+                int ret;
+                if ((ret = ioctl(dev_fd, slave_IOCTL_MMAP, &dm_arg)) < 0) {
+                    perror("option slave_IOCTL_MMAP failed");
+                    return 1;
+                }
+                if (ret == 0)
+                    break;
+
+                data_size += ret;
+                dm_arg.count -= ret;
+                dm_arg.offset += ret;
+            }
+            if(data_size == 0)
+                break;
+
+            posix_fallocate(file_fd, file_size, data_size);
+            char *file_address = NULL;
+            file_address = mmap(NULL, data_size, PROT_WRITE, MAP_SHARED, file_fd, file_size);
+            if (file_address == MAP_FAILED) {
+                perror("file_address = MAP_FAILED");
+                return 1;
+            }
+
+            memcpy(file_address, kernel_address, data_size);
+            munmap(file_address, data_size);
+            file_size += data_size;
+        }
+        ioctl(dev_fd, 0, kernel_address); // default option
+        munmap(kernel_address, PAGE_SIZE);
     }
     else {
         perror("method undefined\n");

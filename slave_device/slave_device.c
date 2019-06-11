@@ -51,20 +51,44 @@ int slave_open(struct inode *inode, struct file *filp);
 static long slave_ioctl(struct file *file, unsigned int ioctl_num, unsigned long ioctl_param);
 ssize_t receive_msg(struct file *filp, char *buf, size_t count, loff_t *offp );
 
+void mmap_open(struct vm_area_struct *vma);
+void mmap_close(struct vm_area_struct *vma);
+static int mmap_fault(struct vm_fault *vmf);
+int slave_mmap(struct file *filp, struct vm_area_struct *vma);
+
 static mm_segment_t old_fs;
 static ksocket_t sockfd_cli;//socket to the master server
 static struct sockaddr_in addr_srv; //address of the master server
 
-//file operations
+struct dev_mmap_arg {
+	size_t count;
+	size_t offset;
+};
+static struct dev_mmap_arg ioctl_arg;
+
+struct mmap_info {
+    char *data;
+    int reference;
+};
+static struct mmap_info *mmap_buf; // pointer to the mapped data in this device
+
+// file operations
 static struct file_operations slave_fops = {
 	.owner = THIS_MODULE,
 	.unlocked_ioctl = slave_ioctl,
 	.open = slave_open,
 	.read = receive_msg,
-	.release = slave_close
+	.release = slave_close,
+    .mmap = slave_mmap
 };
 
-//device info
+static struct vm_operations_struct mmap_vm_ops = {
+    .open = mmap_open,
+    .close = mmap_close,
+    .fault = mmap_fault,    
+};
+
+// device info
 static struct miscdevice slave_dev = {
 	.minor = MISC_DYNAMIC_MINOR,
 	.name = "slave_device",
@@ -95,15 +119,25 @@ static void __exit slave_exit(void)
 }
 
 
-int slave_close(struct inode *inode, struct file *filp)
-{
-	return 0;
-}
-
 int slave_open(struct inode *inode, struct file *filp)
 {
-	return 0;
+	struct mmap_info *info = kmalloc(sizeof(struct mmap_info), GFP_KERNEL);
+    info->data = (char *) get_zeroed_page(GFP_KERNEL);
+    filp->private_data = info; // assign this info struct to the file
+	mmap_buf = info;
+    return 0;
 }
+ 
+int slave_close(struct inode *inode, struct file *filp)
+{
+	struct mmap_info *info = filp->private_data;
+    free_page((unsigned long)info->data);
+    kfree(info);
+    filp->private_data = NULL;
+	mmap_buf = NULL;
+    return 0;
+}
+
 static long slave_ioctl(struct file *file, unsigned int ioctl_num, unsigned long ioctl_param)
 {
 	long ret = -EINVAL;
@@ -142,29 +176,31 @@ static long slave_ioctl(struct file *file, unsigned int ioctl_num, unsigned long
 
 			sockfd_cli = ksocket(AF_INET, SOCK_STREAM, 0);
 			printk("sockfd_cli = 0x%p  socket is created\n", sockfd_cli);
-			if (sockfd_cli == NULL)
-			{
-				printk("socket failed\n");
+			if (sockfd_cli == NULL) {
+				printk("socket failed");
 				return -1;
 			}
-			if (kconnect(sockfd_cli, (struct sockaddr*)&addr_srv, addr_len) < 0)
-			{
-				printk("connect failed\n");
+			if (kconnect(sockfd_cli, (struct sockaddr*)&addr_srv, addr_len) < 0) {
+				printk("connect failed");
 				return -1;
 			}
 			tmp = inet_ntoa(&addr_srv.sin_addr);
 			printk("connected to : %s %d\n", tmp, ntohs(addr_srv.sin_port));
 			kfree(tmp);
-			printk("kfree(tmp)");
-			ret = 0;
-			break;
-		case slave_IOCTL_MMAP:
-
-			break;
-
+            printk("kfree(tmp)");
+            ret = 0;
+            break;
+        case slave_IOCTL_MMAP:
+            if (copy_from_user(&ioctl_arg, (const void *) ioctl_param,
+                        sizeof(struct dev_mmap_arg)) != 0)
+                return -1;
+            if (ioctl_arg.offset + ioctl_arg.count > PAGE_SIZE)
+                return -1;
+            ret = krecv(sockfd_cli, mmap_buf->data + ioctl_arg.offset, ioctl_arg.count, 0);
+            printk("Slave receives %lu bytes of data and writes to mmap buf\n", ret);
+            break;
 		case slave_IOCTL_EXIT:
-			if(kclose(sockfd_cli) == -1)
-			{
+			if (kclose(sockfd_cli) == -1) {
 				printk("kclose cli error\n");
 				return -1;
 			}
@@ -195,6 +231,40 @@ ssize_t receive_msg(struct file *filp, char *buf, size_t count, loff_t *offp )
 	if(copy_to_user(buf, msg, len))
 		return -ENOMEM;
 	return len;
+}
+void mmap_open(struct vm_area_struct *vma)
+{
+    struct mmap_info *info = (struct mmap_info *)vma->vm_private_data;
+    info->reference++;
+}
+ 
+void mmap_close(struct vm_area_struct *vma)
+{
+    struct mmap_info *info = (struct mmap_info *)vma->vm_private_data;
+    info->reference--;
+}
+ 
+static int mmap_fault(struct vm_fault *vmf)
+{
+    struct page *page;
+    struct mmap_info *info;    
+     
+    info = (struct mmap_info *)vmf->vma->vm_private_data;
+    if (info->data) {
+        page = virt_to_page(info->data);      
+    	get_page(page);
+    	vmf->page = page;
+    }
+    return 0;
+}
+ 
+int slave_mmap(struct file *filp, struct vm_area_struct *vma)
+{
+    vma->vm_ops = &mmap_vm_ops;
+    vma->vm_flags |= VM_RESERVED;    
+    vma->vm_private_data = filp->private_data;
+    mmap_open(vma);
+    return 0;
 }
 
 module_init(slave_init);
