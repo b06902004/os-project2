@@ -12,12 +12,12 @@
 #define PAGE_SIZE sysconf(_SC_PAGE_SIZE)
 #define BUF_SIZE 512
 
+#define slave_IOCTL_CREATESOCK 0x12345677
+#define slave_IOCTL_MMAP 0x12345678
+#define slave_IOCTL_EXIT 0x12345679
+
 int main (int argc, char* argv[])
 {
-    /* unused variables */
-//    size_t data_size = -1;
-//    char *kernel_address, *file_address;
-
     /* Read the parameters */
     if (argc != 4) {
         perror("usage: ./slave.out [file_name] [method] [ip address]\n");
@@ -46,7 +46,7 @@ int main (int argc, char* argv[])
     }
 
     /* Ask slave device to connect to master device */
-    if (ioctl(dev_fd, 0x12345677, ip) == -1) {
+    if (ioctl(dev_fd, slave_IOCTL_CREATESOCK, ip) == -1) {
         perror("ioctl create slave socket error\n");
         return 1;
     }
@@ -70,7 +70,6 @@ int main (int argc, char* argv[])
         } while (ret > 0);
     }
     else if (strcmp(method, "mmap") == 0) {
-        // TODO
     }
     else {
         perror("method undefined\n");
@@ -78,7 +77,7 @@ int main (int argc, char* argv[])
     }
 
     /* Ask slave device to close the connection */
-    if (ioctl(dev_fd, 0x12345679) == -1) {
+    if (ioctl(dev_fd, slave_IOCTL_EXIT) == -1) {
         perror("ioctl client exits error\n");
         return 1;
     }

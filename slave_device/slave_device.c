@@ -29,11 +29,7 @@
 #define slave_IOCTL_MMAP 0x12345678
 #define slave_IOCTL_EXIT 0x12345679
 
-
 #define BUF_SIZE 512
-
-
-
 
 struct dentry  *file1;//debug file
 
@@ -200,9 +196,6 @@ ssize_t receive_msg(struct file *filp, char *buf, size_t count, loff_t *offp )
 		return -ENOMEM;
 	return len;
 }
-
-
-
 
 module_init(slave_init);
 module_exit(slave_exit);

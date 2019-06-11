@@ -9,17 +9,16 @@
 #include <sys/types.h>
 #include <time.h> /* clock_gettime */
 
-#define PAGE_SIZE sysconf(_SC_PAGE_SIZE)
+#define PAGE_SIZE 4096
 #define BUF_SIZE 512
+#define master_IOCTL_CREATESOCK 0x12345677
+#define master_IOCTL_MMAP 0x12345678
+#define master_IOCTL_EXIT 0x12345679
 
-off_t get_filesize(const char* filename); // get the size of the input file
+off_t get_filesize(const char* filename);
 
 int main (int argc, char* argv[])
 {
-    /* unused variables */
-//    size_t offset = 0, tmp;
-//    char *kernel_address = NULL, *file_address = NULL;
-
     /* Read the parameters */
     if (argc != 3) {
         perror("usage: ./master.out [file_name] [method]\n");
@@ -33,7 +32,7 @@ int main (int argc, char* argv[])
     int dev_fd;
     struct timespec start;
     if ((dev_fd = open("/dev/master_device", O_RDWR)) < 0) {
-        perror("failed to open /dev/master_device\n");
+        perror("failed to open /dev/master_device");
         return 1;
     }
     clock_gettime(CLOCK_REALTIME, &start);
@@ -41,20 +40,20 @@ int main (int argc, char* argv[])
     /* Open the input file */
     int file_fd;
     if ((file_fd = open(file_name, O_RDWR)) < 0) {
-        perror("failed to open input file\n");
+        perror("failed to open input file");
         return 1;
     }
 
     /* Get the size of the input file */
     off_t file_size;
     if ((file_size = get_filesize(file_name)) < 0) {
-        perror("failed to get file size\n");
+        perror("failed to get file size");
         return 1;
     }
 
     /* Ask the master device to create a socket and listen */
-    if (ioctl(dev_fd, 0x12345677) == -1) {
-        perror("ioctl server create socket error\n");
+    if (ioctl(dev_fd, master_IOCTL_CREATESOCK) == -1) {
+        perror("ioctl server create socket error");
         return 1;
     }
 
@@ -64,26 +63,25 @@ int main (int argc, char* argv[])
         char buf[BUF_SIZE];
         do {
             if ((ret = read(file_fd, buf, sizeof(buf))) < 0) {
-                perror("read failed\n");
+                perror("read failed");
                 return 1;
             }
             if (write(dev_fd, buf, ret) < 0) {
-                perror("write failed\n");
+                perror("write failed");
                 return 1;
             }
         } while (ret > 0);
     }
     else if (strcmp(method, "mmap") == 0) {
-        // TODO
     }
     else {
-        perror("method undefined\n");
+        perror("method undefined");
         return 1;
     }
 
     /* Ask the master device to close the connection */
-    if (ioctl(dev_fd, 0x12345679) == -1) {
-        perror("ioctl server exits error\n");
+    if (ioctl(dev_fd, master_IOCTL_EXIT) == -1) {
+        perror("ioctl server exits error");
         return 1;
     }
 
